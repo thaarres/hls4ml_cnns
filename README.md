@@ -8,7 +8,7 @@ ssh -XY myuser@hlssynt-04
 copy models from AFS to Docker repository (you will have no access to. your AFS from docker)
 ```python
 cd /data/myuser/hls4ml_docker/
-cp /path/to/mymodel.h5 .
+cp /path/to/mymodel.h5 models/
 ```
 Get hls4ml's CNN branch
 ```python
