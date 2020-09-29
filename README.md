@@ -19,6 +19,7 @@ pip3 install . --user
 Now get Vivado through docker
 ```python
 docker exec -it --user `id -u`:`id -g` -e DISPLAY=$DISPLAY hls4ml-test bash
+cd /data/myuser/hls4ml_docker/
 ```
 and run
 ```python
