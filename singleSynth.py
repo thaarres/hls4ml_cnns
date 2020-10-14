@@ -13,26 +13,23 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import pandas
 
-def toHLS(precision=32):
-  m=model_stripped
+def toHLS(m,precision=32):
   hls_cfg = hls4ml.utils.config_from_keras_model(m)
   hls_cfg['Model']['PackFactor'] = 1 # an integer that divides the image width with no remained
   cfg = hls4ml.converters.create_vivado_config()
   cfg['IOType'] = 'io_stream'
   cfg['HLSConfig'] = hls_cfg
   cfg['KerasModel'] = m # the model
-  hls_cfg['Model']['Precision'] = 'ap_fixed<{},{}>'.format(precision,intbits_w)
-  hls_cfg['LayerType']['Activation']['Precision'] = 'ap_fixed<{},{}>'.format(precision,intbits_a)
+  #hls_cfg['Model']['Precision'] = 'ap_fixed<16,6>'
 
-  cfg['OutputDir'] = model_name.replace(".h5","")+"_bw%i_int%i"%(precision,intbits) # wherever you want the project to go
+  cfg['OutputDir'] = model_name.replace(".h5","")
   cfg['XilinxPart'] = 'xcvu9p-flgb2104-2l-e'
   print("Configuration is \n")
   print(cfg)
   hls_model = hls4ml.converters.keras_to_hls(cfg)
-  wp,ap = numerical(keras_model=m, hls_model=hls_model, X=img_test[:1000])
-  add_logo(ax, fig, 0.14, position='upper right')
-  wp.savefig('%s_profile_weights.pdf'%cfg['OutputDir'])
-  ap.savefig('%s_profile_activations.pdf'%cfg['OutputDir'])
+  #wp,ap = numerical(keras_model=m, hls_model=hls_model, X=img_test[:1000])
+  #wp.savefig('%s_profile_weights.pdf'%cfg['OutputDir'])
+  #ap.savefig('%s_profile_activations.pdf'%cfg['OutputDir'])
   hls_model.build(csim=False, synth=True, vsynth=True) 
 
 def readReports(indir,p):
@@ -103,31 +100,26 @@ def make_plots(data):
     plt.savefig("scan_latency_ns.pdf")
 
 if __name__ == '__main__':
-    doParallel = False
+    
     model_name = str(sys.argv[1])
-    model = tf.keras.models.load_model("/data/thaarres/hls4ml_docker/hls4ml_cnns/latency_models/"+model_name,custom_objects={'PruneLowMagnitude': pruning_wrapper.PruneLowMagnitude,'QDense': QDense, 'QConv2D': QConv2D, 'Clip': Clip, 'QActivation': QActivation})
+    model = tf.keras.models.load_model(model_name,custom_objects={'PruneLowMagnitude': pruning_wrapper.PruneLowMagnitude,'QDense': QDense, 'QConv2D': QConv2D, 'Clip': Clip, 'QActivation': QActivation})
     model.summary()
-    model_stripped = strip_pruning(model)
-    (img_train, label_train), (img_test, label_test) = tfds.load("svhn_cropped", split=['train', 'test'], batch_size=-1, as_supervised=True,)
-    del (img_train, label_train)
-    a = hls4ml.model.profiling.activations_keras(model_stripped, img_test[:1000], fmt='summary')
-    intbits_a = (np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], a)))))) + 1)
-    w = hls4ml.model.profiling.activations_weights(model_stripped, img_test[:1000], fmt='summary')
-    intbits_w = (np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], w)))))) + 1)
-rint("Starting hls project")
-    precision = [16,14,12,10,8,6,4,3,2,1]
-    data = {'w':[], 'dsp':[], 'lut':[], 'ff':[], 'bram':[], 'latency_clks':[], 'latency_ns':[], 'latency_ii':[]}
-    if doParallel:
-        Parallel(n_jobs=10, backend='multiprocessing')(delayed(toHLS)(i) for i in precision)
+    model = strip_pruning(model)
+    #(img_train, label_train), (img_test, label_test) = tfds.load("svhn_cropped", split=['train', 'test'], batch_size=-1, as_supervised=True,)
+    #del (img_train, label_train)
+    #a = hls4ml.model.profiling.activations_keras(model_stripped, img_test[:1000], fmt='summary')
+    #intbits = (np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], a)))))) + 1)
+    #print("Starting hls project")
+    #precision = [16,14,12,10,8,6,4,3,2,1]
+    #data = {'w':[], 'dsp':[], 'lut':[], 'ff':[], 'bram':[], 'latency_clks':[], 'latency_ns':[], 'latency_ii':[]}
+    #Parallel(n_jobs=10, backend='multiprocessing')(delayed(toHLS)(i) for i in precision)
     #precision = np.flip(precision)
-    else:
-        for p in precision:
-            toHLS(p)
-    for p in precision:
-        datai = readReports(model_name.replace(".h5","")+"_bw%i_int%i"%(p,intbits),p)
-        for key in datai.keys():
-            data[key].append(datai[key])
+#    for p in precision:
+    toHLS(model)
+#      datai = readReports(model_name.replace(".h5","")+"_bw%i_int%i"%(p,intbits),p)
+#      for key in datai.keys():
+#        data[key].append(datai[key])
 
-    data = pandas.DataFrame(data)
-    make_plots(data)
-    data.to_csv(r'data_%s.csv'%model_name, index = False)
+#    data = pandas.DataFrame(data)
+#    make_plots(data)
+#data.to_csv(r'data_%s.csv'%model_name, index = False)
