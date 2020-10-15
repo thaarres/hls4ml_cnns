@@ -15,8 +15,8 @@ from tensorflow.keras.utils import to_categorical
 from sklearn.metrics import roc_curve, auc, accuracy_score
   
 def getNumpyData(dataset_name,oneHot=True):
-  ds_train = tfds.load(name=dataset_name, split="train", batch_size=-1, data_dir='/afs/cern.ch/user/t/thaarres/tensorflow_datasets/')
-  ds_test = tfds.load(name =dataset_name, split="test", batch_size=-1, data_dir='/afs/cern.ch/user/t/thaarres/tensorflow_datasets/')
+  ds_train = tfds.load(name=dataset_name, split="train", batch_size=-1)#, data_dir='/afs/cern.ch/user/t/thaarres/tensorflow_datasets/')
+  ds_test = tfds.load(name =dataset_name, split="test", batch_size=-1)#, data_dir='/afs/cern.ch/user/t/thaarres/tensorflow_datasets/')
 
   dataset = tfds.as_numpy(ds_train)
   x_train, y_train = dataset["image"].astype(np.float32), dataset["label"]
