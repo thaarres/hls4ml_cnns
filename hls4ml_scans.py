@@ -1,4 +1,4 @@
-import setGPU
+#import setGPU
 import sys
 import hls4ml
 import tensorflow as tf
