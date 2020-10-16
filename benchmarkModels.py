@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import pandas
 from hls4ml_scans import getNumpyData
+from sklearn.metrics import roc_curve, auc, accuracy_score
+
 def print_dict(d, indent=0):
     align=20
     for key, value in d.items():
@@ -34,11 +36,12 @@ def toHLS(precision=32):
     po = 'ap_fixed<{},{}>'.format(precision,4)  
   
   hls_cfg = {'Model' : {'Precision' : pw}}
+  hls_cfg['LayerName'] = {'output_softmax' : {'Strategy' : 'Stable'}}
   hls_cfg['LayerType'] = {'Input' : {'Precision' : 'ap_fixed<16,6>'},
                         'Dense' : {'Precision' : {'result' : po}},
                         'Conv2D' : {'Precision' : {'result' : po}},
                         'MaxPooling2D' : {'Precision' : {'result' : po}},
-                        'BatchNormalization' : {'Precision' : {'result' : po}},
+                        'BatchNormalization' : {'Precision' : po},
                         'Activation' : {'Precision' : {'result' : po}}}
   hls_cfg['Model']['PackFactor'] = 1 # an integer that divides the image width with no remained
   hls_cfg['Model']['ReuseFactor'] = 1
@@ -63,6 +66,25 @@ def toHLS(precision=32):
   print("Configuration is \n")
   print_dict(hls_cfg)
   hls_model = hls4ml.converters.keras_to_hls(cfg)
+  hls_model.compile()
+  
+  print('Compile and predict')
+  x_test = img_test[:1000]
+  y_test = img_test[:1000]
+  y_predict        = model    .predict(x_test)
+  y_predict_hls4ml = hls_model.predict(x_test)
+  print("y_predict = ", y_predict[2])
+  print("y_predict_hls4ml = ", y_predict_hls4ml[2])
+  print("y_test = ", y_test[2])
+  print("arg ypred = ", np.argmax(y_predict[2]))
+  print("arg ypredhls = ", np.argmax(y_predict_hls4ml[2]))
+  data['accuracy_keras'] = accuracy_score (y_test, np.argmax(y_predict,axis=1).reshape(-1,1))
+  data['accuracy_hls4ml'] = accuracy_score(y_test, np.argmax(y_predict_hls4ml,axis=1).reshape(-1,1))
+#  print(y_test- np.argmax(y_predict_hls4ml,axis=1))
+      
+  print("Accuracy: Keras={} hls4ml={}".format(data['accuracy_keras'],data['accuracy_hls4ml']))
+
+
   hls_model.build(csim=False,synth=True, vsynth=True)
   #hls4ml.utils.plot_model(hls_model, show_shapes=True, show_precision=True, to_file='plot_model_{}.png'.format(precision))
   #wp,ap = numerical(keras_model=m, hls_model=hls_model, X=img_test[:5000])
@@ -151,13 +173,14 @@ if __name__ == '__main__':
     intbits_w = int(np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], w)))))) + 1)
     print("Starting hls project, using {} int bits for weights+bias and {} int bits for outputs".format(intbits_a,intbits_w))
     precision = [16,14,12,10,8,6,4,3,2,1]
+    precision = [16]
     data = {'w':[], 'dsp':[], 'lut':[], 'ff':[], 'bram':[], 'latency_clks':[], 'latency_ns':[], 'latency_ii':[]}
-    #if doParallel:
-    Parallel(n_jobs=10, backend='multiprocessing')(delayed(toHLS)(i) for i in precision)
+    if doParallel:
+      Parallel(n_jobs=10, backend='multiprocessing')(delayed(toHLS)(i) for i in precision)
     #precision = np.flip(precision)
-    #else:
-     #   for p in precision:
-      #      toHLS(p)
+    else:
+      for p in precision:
+        toHLS(p)
     #for p in precision:
    #     datai = readReports(model_name.replace(".h5","")+"_bw%i"%(p),p)
   #      for key in datai.keys():

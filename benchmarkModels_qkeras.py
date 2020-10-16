@@ -14,7 +14,7 @@ from matplotlib.ticker import MaxNLocator
 import pandas
 
 def toHLS(precision=32):
-  model = tf.keras.models.load_model("/data/thaarres/hls4ml_docker/hls4ml_cnns/latency_models/qkeras/"+model_name+"_%ibit.h5"%precision,custom_objects={'PruneLowMagnitude': pruning_wrapper.PruneLowMagnitude,'QDense': QDense, 'QConv2D': QConv2D, 'Clip': Clip, 'QActivation': QActivation})
+  model = tf.keras.models.load_model("/data/thaarres/hls4ml_docker/hls4ml_cnns/models/"+model_name+"_%ibit_0/model_best.h5"%precision,custom_objects={'PruneLowMagnitude': pruning_wrapper.PruneLowMagnitude,'QDense': QDense, 'QConv2D': QConv2D, 'Clip': Clip, 'QActivation': QActivation})
   model.summary()
   m = strip_pruning(model)
   hls_cfg = hls4ml.utils.config_from_keras_model(m)
@@ -109,12 +109,12 @@ if __name__ == '__main__':
    #intbits = (np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], a)))))) + 1)
     model_name = str(sys.argv[1])
     print("Starting hls project")
-    precision = [16,14,12,10,8,6,4,3,2,1]
+    precision = [6,4,3,2,1]
     data = {'w':[], 'dsp':[], 'lut':[], 'ff':[], 'bram':[], 'latency_clks':[], 'latency_ns':[], 'latency_ii':[]}
-    #Parallel(n_jobs=10, backend='multiprocessing')(delayed(toHLS)(i) for i in precision)
+    Parallel(n_jobs=5, backend='multiprocessing')(delayed(toHLS)(i) for i in precision)
     #precision = np.flip(precision)
-    for p in precision:
-       toHLS(p)
+#    for p in precision:
+ #      toHLS(p)
    #datai = readReports(model_name.replace(".h5","")+"_bw%i"%p,p)
    #for key in datai.keys():
    #         data[key].append(datai[key])
