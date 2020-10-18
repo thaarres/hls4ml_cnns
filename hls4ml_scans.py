@@ -217,7 +217,7 @@ if __name__ == "__main__":
     intbits_w = int(np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], w)))))) + 1)
     print("Starting hls project")
     precision = [16,14,12,10,8,2]
-    precision = [16,14,12,10,8]
+    precision = [16]
     precision = np.flip(precision)
     data = {'w':[],'accuracy_keras':[],'accuracy_hls4ml':[],  'dsp':[], 'lut':[], 'ff':[],'bram':[], 'latency_clks':[], 'latency_ns':[], 'latency_ii':[]}
     for p in precision:
