@@ -25,6 +25,7 @@ def toHLS(precision=32):
   m = strip_pruning(model)
   hls_cfg = hls4ml.utils.config_from_keras_model(m)
   hls_cfg['Model']['PackFactor'] = 1 # an integer that divides the image width with no remained
+  hls_cfg['LayerName'] = {'output_softmax' : {'Strategy' : 'Stable'}}
   cfg = hls4ml.converters.create_vivado_config()
   cfg['IOType'] = 'io_stream'
   cfg['HLSConfig'] = hls_cfg
@@ -35,12 +36,12 @@ def toHLS(precision=32):
   print('Configuration is \n')
   print(cfg)
   hls_model = hls4ml.converters.keras_to_hls(cfg)
-  if precision == 16:
-    (x_train, y_train), (x_test, y_test) = getNumpyData('svhn_cropped',oneHot=False)
-    wp,ap = numerical(keras_model=model, hls_model=hls_model, X=x_test[:1000])
-    wp.savefig('{}_profile_weights_LayerTypePrecision.pdf'.format(model_name.replace('.h5','')))
-    ap.savefig('{}_profile_activations_LayerTypePrecision.pdf'.format(model_name.replace('.h5','')))
-    del x_train, y_train,x_test, y_test
+  # if precision == 16:
+  #   (x_train, y_train), (x_test, y_test) = getNumpyData('svhn_cropped',oneHot=False)
+  #   wp,ap = numerical(keras_model=model, hls_model=hls_model, X=x_test[:1000])
+  #   wp.savefig('{}_profile_weights_LayerTypePrecision.pdf'.format(model_name.replace('.h5','')))
+  #   ap.savefig('{}_profile_activations_LayerTypePrecision.pdf'.format(model_name.replace('.h5','')))
+  #   del x_train, y_train,x_test, y_test
     
   if DEBUG:
     (x_train, y_train), (x_test, y_test) = getNumpyData('svhn_cropped',oneHot=False)
@@ -90,12 +91,12 @@ def toHLS(precision=32):
   
 if __name__ == '__main__':
   if not os.path.exists('cnn_projects'): 
-   os.system('mkdir cnn_projects')
-   model_name = str(sys.argv[1])
-   print('Starting hls project')
-   precision = [16,14,12,10,8,6,4,3,2,1]
-   data = {'w':[], 'dsp':[], 'lut':[], 'ff':[], 'bram':[], 'latency_clks':[], 'latency_ns':[], 'latency_ii':[]}
-   Parallel(n_jobs=5, backend='multiprocessing')(delayed(toHLS)(i) for i in precision)
+    os.system('mkdir cnn_projects')
+  model_name = str(sys.argv[1])
+  print('Starting hls project')
+  precision = [16,14,12,10,8,6,4,3,2,1]
+  data = {'w':[], 'dsp':[], 'lut':[], 'ff':[], 'bram':[], 'latency_clks':[], 'latency_ns':[], 'latency_ii':[]}
+  Parallel(n_jobs=5, backend='multiprocessing')(delayed(toHLS)(i) for i in precision)
    # for p in precision:
    #   toHLS(p)
  
