@@ -124,34 +124,26 @@ def toHLS(precision=32):
 
 if __name__ == '__main__':
   
-  from optparse import OptionParser
-  if __name__ == '__main__':
-    if not os.path.exists('plots'): 
-      os.system('mkdir plots')
-    if not os.path.exists('cnn_projects'): 
-      os.system('mkdir cnn_projects')  
-    # parser = OptionParser()
-    # parser.add_option('-o','--indir',action='store',type='string',dest='indir',default='models/', help='Input folder')
-    # (options,args) = parser.parse_args()
-    # indir = options.indir
-    # for x in os.walk(indir):
-    #   if not x[0].endswith('_0'):
-    #     continue
-    #   print(x[0])
-      model_name = str(sys.argv[1])
-      model = tf.keras.models.load_model('models/'+model_name,custom_objects={'PruneLowMagnitude': pruning_wrapper.PruneLowMagnitude,'QDense': QDense, 'QConv2D': QConv2D, 'Clip': Clip, 'QActivation': QActivation})
-      model.summary()
-      model  = strip_pruning(model)
-      (x_train, y_train), (x_test, y_test) = getNumpyData('svhn_cropped',oneHot=False)
-      a = hls4ml.model.profiling.activations_keras(model, x_test[:1000], fmt='summary')
-      intbits_a = int(np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], a)))))) + 1)
-      # w = hls4ml.model.profiling.weights_keras(model, fmt='summary')
-      # intbits_w = int(np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], w)))))) + 1)
+  if not os.path.exists('plots'): 
+    os.system('mkdir plots')
+  if not os.path.exists('cnn_projects'): 
+    os.system('mkdir cnn_projects')  
 
-      print('Starting hls project, using {} int bits for weights+bias and {} int bits for outputs'.format(intbits_a,intbits_w))
-      precision = [16,14,12,10,8,6,4,3,2,1]
-      data = {'w':[], 'dsp':[], 'lut':[], 'ff':[], 'bram':[], 'latency_clks':[], 'latency_ns':[], 'latency_ii':[]}
-      Parallel(n_jobs=5, backend='multiprocessing')(delayed(toHLS)(i) for i in precision)
-      # #precision = np.flip(precision)
-      # for p in precision:
-      #  toHLS(p)
+  model_name = str(sys.argv[1])
+  model = tf.keras.models.load_model('models/'+model_name,custom_objects={'PruneLowMagnitude': pruning_wrapper.PruneLowMagnitude,'QDense': QDense, 'QConv2D': QConv2D, 'Clip': Clip, 'QActivation': QActivation})
+  model.summary()
+  model  = strip_pruning(model)
+  (x_train, y_train), (x_test, y_test) = getNumpyData('svhn_cropped',oneHot=False)
+  a = hls4ml.model.profiling.activations_keras(model, x_test[:1000], fmt='summary')
+  intbits_a = int(np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], a)))))) + 1)
+  # w = hls4ml.model.profiling.weights_keras(model, fmt='summary')
+  # intbits_w = int(np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], w)))))) + 1)
+  
+  print('Starting hls project, using {} int bits for weights+bias and {} int bits for outputs'.format(intbits_a,intbits_a))
+  precision = [16,14,12,10,8,6,4,3,2,1]
+  data = {'w':[], 'dsp':[], 'lut':[], 'ff':[], 'bram':[], 'latency_clks':[], 'latency_ns':[], 'latency_ii':[]}
+  Parallel(n_jobs=5, backend='multiprocessing')(delayed(toHLS)(i) for i in precision)
+  # #precision = np.flip(precision)
+  # for p in precision:
+  #  toHLS(p)
+  
