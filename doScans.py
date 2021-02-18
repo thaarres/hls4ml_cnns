@@ -1,4 +1,5 @@
-import sys
+import sys,os
+from joblib import Parallel, delayed
 import hls4ml
 import tensorflow as tf
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wrapper
@@ -11,129 +12,131 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import pandas
+from plot import getNumpyData
+from sklearn.metrics import roc_curve, auc, accuracy_score
+from unittest.mock import patch
+import time
+from optparse import OptionParser
 
-def preprocess(image, label,nclasses=10):
-  image = tf.cast(image, tf.float32) / 255.
-  label = tf.one_hot(tf.squeeze(label), nclasses)
-  return image, label
+def print_dict(d, indent=0):
+    align=20
+    for key, value in d.items():
+        print('  ' * indent + str(key), end='')
+        if isinstance(value, dict):
+            print()
+            print_dict(value, indent+1)
+        else:
+            print(':' + ' ' * (20 - len(key) - 2 * indent) + str(value))
+                  
+def getQKeras(model,model_name,precision,reuse,intbits_a=6,odir='cnn_projects'):
+  
+  hls4ml.model.optimizer.OutputRoundingSaturationMode.layers = ['Activation']
+  hls4ml.model.optimizer.OutputRoundingSaturationMode.rounding_mode = 'AP_RND'
+  hls4ml.model.optimizer.OutputRoundingSaturationMode.saturation_mode = 'AP_SAT'
 
-def toHLS(model,model_name,precision=32):
+  hls_config = hls4ml.utils.config_from_keras_model(model, granularity='name')
+  hls_config['Model']['Precision'] = 'ap_fixed<16,6>'
+  hls_config['Model']['ReuseFactor'] = reuse
   
-  (img_train, label_train), (img_test, label_test) = tfds.load("svhn_cropped", split=['train', 'test'], batch_size=-1, as_supervised=True,)
-  del (img_train, label_train)
-  a = hls4ml.model.profiling.activations_keras(model, img_test[:1000], fmt='summary')
-  intbits = (np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], a)))))) + 1)
-  
-  hls_cfg = hls4ml.utils.config_from_keras_model(model, granularity='model')
-  hls_cfg['Model']['PackFactor'] = 1 # an integer that divides the image width with no remained
-  hls_cfg['Model']['Precision'] = 'ap_fixed<%i,%i>'%(precision,int(intbits))
-  print(hls_cfg)
-  hls_model = hls4ml.converters.convert_from_keras_model(model, hls_config=hls_cfg, output_dir='model_1/hls4ml_prj')
-  # hls4ml.utils.plot_model(hls_model, show_shapes=True, show_precision=True, to_file=None)
-  hls_model.compile()
-  score = hls_model.evaluate(test_data)
-  print("hlsModel Accuracy {} = {}".format(model_name,score[1]))
-  wp,ap = numerical(keras_model=model, hls_model=hls_model, X=img_test[:1000])
-  wp.savefig('%s_profile_weights.pdf'%cfg['OutputDir'])
-  ap.savefig('%s_profile_activations.pdf'%cfg['OutputDir'])
+  for Layer in model.layers:
+    if isinstance(Layer, tf.keras.layers.Flatten):
+      hls_config['LayerName'][Layer.name] = {}  
+    hls_config['LayerName'][Layer.name]['ReuseFactor']  = reuse
+  hls_config['LayerName']['output_softmax']['Strategy'] = 'Stable'
+  print(hls_config)
   
   cfg = hls4ml.converters.create_vivado_config()
-  cfg['IOType'] = 'io_stream'
-  cfg['HLSConfig'] = hls_cfg
-  cfg['KerasModel'] = model # the model
-  cfg['OutputDir'] = model_name.replace(".h5","")+"_bw%i_int%i"%(precision,intbits) # wherever you want the project to go
+  cfg['IOType']     = 'io_stream'
+  cfg['HLSConfig']  = hls_config
+  cfg['KerasModel'] = model
+  cfg['OutputDir']  = '{}/{}_{}bit_reuse{}'.format(odir,model_name,precision,reuse)
   cfg['XilinxPart'] = 'xcvu9p-flgb2104-2l-e'
-  print("Configuration is \n")
-  print(cfg)
+  
+  hls_model = hls4ml.converters.keras_to_hls(cfg)
+    
+  hls_model.compile()
+  
+  return hls_model
+  
+def getBaseline(model,model_name,precision,reuse,intbits_a=6,odir='cnn_projects'):
+  # pw = 'ap_fixed<{},{}>'.format(precision,intbits_w)
+  po = 'ap_fixed<{},{}>'.format(precision,intbits_a) 
+  if precision < 10:
+    # pw = 'ap_fixed<{},{}>'.format(precision,4)
+    po = 'ap_fixed<{},{}>'.format(precision,4)
+
+  hls_config = {'Model' : {'Precision' : po}}
+  hls_config['Model']['ReuseFactor'] = reuse
+  hls_config['LayerName']={}
+  for Layer in model.layers:
+    hls_config['LayerName'][Layer.name] = {}
+    hls_config['LayerName'][Layer.name]['ReuseFactor'] = reuse  
+  hls_config['LayerName'] = {'output_softmax' : {'Strategy' : 'Stable'}}
+  print_dict(hls_config)
+  
+  cfg = hls4ml.converters.create_vivado_config()
+  cfg['IOType']     = 'io_stream'
+  cfg['HLSConfig']  = hls_config
+  cfg['KerasModel'] = model
+  cfg['OutputDir']  = '{}/{}_{}bit_reuse{}'.format(odir,model_name,precision,reuse)
+  cfg['XilinxPart'] = 'xcvu9p-flgb2104-2l-e'
+  hls_model = hls4ml.converters.keras_to_hls(cfg)
+  hls_model.compile()
+  
+  return hls_model
+  
+def toHLS(p,r,m,doQK=False,intbits_a=0,odir='cnn_projects'):
+  if doQK:
+    model = tf.keras.models.load_model('models/{}_{}bit_0/model_best.h5'.format(m,p),custom_objects={'PruneLowMagnitude': pruning_wrapper.PruneLowMagnitude,'QDense': QDense, 'QConv2D': QConv2D, 'Clip': Clip, 'QActivation': QActivation})
+    model = strip_pruning(model)
+    hls_model = getQKeras(model=model,model_name=m,precision=p,reuse=r,intbits_a=intbits_a,odir=odir)
+  
+  else:
+    model = tf.keras.models.load_model('models/{}_0/model_best.h5'.format(m),custom_objects={'PruneLowMagnitude': pruning_wrapper.PruneLowMagnitude,'QDense': QDense, 'QConv2D': QConv2D, 'Clip': Clip, 'QActivation': QActivation})
+    model  = strip_pruning(model)  
+    hls_model = getBaseline(model=model,model_name=m,precision=p,reuse=r,intbits_a=intbits_a,odir=odir)
+  
+  # hls_model.build(csim=False, synth=True, vsynth=True)
+
+if __name__ == '__main__':
+  
+  parser = OptionParser()
+  parser.add_option("-f", "--file", dest="filename")
+  parser.add_option('-m','--model', dest='modelname',default='full')
+  parser.add_option('-o','--outdir', dest='outdir',default='cnn_projects')
+  parser.add_option('-Q','--doQK',action='store_true', dest='doQKeras'  , default=False, help='do QKeras models')
+  parser.add_option('-S','--doScan',action='store_true', dest='doScan'  , default=False, help='do reuse factor scan')
+
+  (options,args) = parser.parse_args()
   
   
+  if not os.path.exists('plots'): 
+    os.system('mkdir plots')
+  if not os.path.exists(options.outdir): 
+    os.system('mkdir {}'.format(options.outdir))  
+
+  model_name = options.modelname
+  intbits_a = 0
+  if not options.doQKeras:
+    model = tf.keras.models.load_model('models/{}_0/model_best.h5'.format(model_name),custom_objects={'PruneLowMagnitude': pruning_wrapper.PruneLowMagnitude,'QDense': QDense, 'QConv2D': QConv2D, 'Clip': Clip, 'QActivation': QActivation})
+    model.summary()
+    model  = strip_pruning(model)
+    (x_train, y_train), (x_test, y_test) = getNumpyData('svhn_cropped',oneHot=False)
+    a = hls4ml.model.profiling.activations_keras(model, x_test[:1000], fmt='summary')
+    intbits_a = int(np.ceil(max(np.log2(np.array(list(map(lambda x : x['whishi'], a)))))) + 1)
+    print('Starting hls project, using {} int bits'.format(intbits_a))
   
-  indir= '/eos/home-t/thaarres/hls4ml_cnns/synthesized/final_cnn_bw%i/'%precision
-  data = {}
-  data['w']= int(p)
-  # Get the resources from the logic synthesis report 
-  report = open('{}/vivado_synth.rpt'.format(indir))
-  lines = np.array(report.readlines())
-  data['lut'] = int(lines[np.array(['CLB LUTs*' in line for line in lines])][0].split('|')[2])
-  data['ff'] = int(lines[np.array(['CLB Registers' in line for line in lines])][0].split('|')[2])
-  data['bram'] = float(lines[np.array(['Block RAM Tile' in line for line in lines])][0].split('|')[2])
-  data['dsp'] = int(lines[np.array(['DSPs' in line for line in lines])][0].split('|')[2])
-  report.close()
-  
-  # Get the latency from the Vivado HLS report
-  report = open('{}/myproject_prj/solution1/syn/report/myproject_csynth.rpt'.format(indir))
-  lines = np.array(report.readlines())
-  lat_line = lines[np.argwhere(np.array(['Latency (clock cycles)' in line for line in lines])).flatten()[0] + 6]
-  data['latency_clks'] = int(lat_line.split('|')[2])
-  data['latency_ns'] = float(lat_line.split('|')[2])*5.0
-  data['latency_ii'] = int(lat_line.split('|')[4])
-  return data
-
-def make_plots(data):
-    print(data)
-    plt.clf()
-    fig,ax = plt.subplots()
-    plt.plot(data['w'], data['dsp'] * 10, label=r'DSP (scaled by x10)', color='#a6611a')
-    plt.plot(data['w'], data['lut'], label=r'LUT', color='#dfc27d')
-    plt.plot(data['w'], data['ff'], label=r'FF', color ='#80cdc1')
-    plt.plot(data['w'], data['bram'] * 100, label=r'BRAM (scaled by x100)', color ='#018571')
-    plt.legend()
-    plt.xlabel('Bitwidth')
-    plt.ylabel('Resource Consumption')
-    plt.gca().get_xaxis().set_major_locator(MaxNLocator(integer=True))
-    plt.savefig("scan_resources.pdf")
-
-    plt.clf()
-    fig,ax = plt.subplots()
-    plt.plot(data['w'], data['latency_clks'], label=r'Latency', color='#a6611a')
-    plt.plot(data['w'], data['latency_ii'], label=r'Initiation Interval', color ='#80cdc1')
-    plt.legend()
-    plt.figtext(0.125, 0.18,'Post-training quant. (5 ns clock)', wrap=True, horizontalalignment='left',verticalalignment='bottom')
-    axes = plt.gca()
-    #axes.set_xlim([1.,16])
-    axes.set_ylim([6000,8250])
-    plt.xlabel('Bitwidth')
-    plt.ylabel('Latency (clock cycles)')
-    plt.gca().get_xaxis().set_major_locator(MaxNLocator(integer=True))
-    plt.savefig("scan_latency_cc.pdf")
-
-    plt.clf()
-    fig,ax = plt.subplots()
-    plt.plot(data['w'], data['latency_ns'] / 1000., label=r'Latency', color='#a6611a') 
-    plt.plot(data['w'], 5 * data['latency_ii'] / 1000., label=r'Initiation Interval', color ='#80cdc1')
-    plt.legend()
-    plt.figtext(0.125, 0.18,'Post-training quant. (5 ns clock)', wrap=True, horizontalalignment='left',verticalalignment='bottom')
-    axes = plt.gca()
-    #axes.set_xlim([1.,16])
-    axes.set_ylim([30,45])
-    plt.xlabel('Bitwidth')
-    plt.ylabel('Latency (microseconds)')
-    plt.gca().get_xaxis().set_major_locator(MaxNLocator(integer=True))
-    plt.savefig("scan_latency_ns.pdf")
-
-
-
-
-test_data, test_info = tfds.load("svhn_cropped", split='test', as_supervised=True, with_info=True)
-#fig = tfds.show_examples(test_data, test_info)
-#fig.savefig("svhn.pdf")
-test_data   = test_data .map(preprocess).batch(1024)
-
-models = ["full","full_pruned"]#,"qkeras","qkeras_pruned"]
-for model_name in models:
-  model = tf.keras.models.load_model("latency_models/{}.h5".format(model_name),custom_objects={'PruneLowMagnitude': pruning_wrapper.PruneLowMagnitude,'QDense': QDense, 'QConv2D': QConv2D, 'Clip': Clip, 'QActivation': QActivation})
-  score = model.evaluate(test_data)
-  print("Accuracy {} = {}".format(model_name,score[1]))
-  model = strip_pruning(model)
-  print("Starting hls project")
   precision = [16,14,12,10,8,6,4,3,2,1]
-# precision = np.flip(precision)
-  data = {'accuracy':[], 'w':[], 'dsp':[], 'lut':[], 'ff':[],'bram':[], 'latency_clks':[], 'latency_ns':[], 'latency_ii':[]}
+  reuse     = [1,2,3,4,5,6]
+  precision = [16]
+  reuse = [1]
+  #
+  start = time.time()
+  # Parallel(n_jobs=4, backend='multiprocessing')(delayed(toHLS)(i, j,model_name,options.doQKeras,intbits_a,odir=options.outdir) for i in precision for j in reuse)
+  end = time.time()
+  print('Ended after {:.4f} s'.format(end-start))
+
+  precision = np.flip(precision)
   for p in precision:
-    toHLS(model,model_name,p)
-    datai = readReports(model,model_name,p)
-#    for key in datai.keys():
-#             data[key].append(datai[key])
-#
-# data = pandas.DataFrame(data)
-# make_plots(data)
+   for r in reuse:
+     toHLS(p,r,model_name,options.doQKeras,intbits_a,options.outdir)
